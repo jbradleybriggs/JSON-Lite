@@ -1,13 +1,18 @@
-package report_generator.lib;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.StringReader;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Lightweight JSON parser.
@@ -111,6 +116,25 @@ public class JSON {
 		return this ;
 	}
 	
+	/**
+	 * Adds a value at a particular "key path". For example:<br>
+	 * <code>
+	 *		JSON json = new JSON() ;<br>
+	 *		json.add(new String[]{"level1", "level2", "key"}, "value");<br>
+	 * </code>
+	 * This will produce the following JSONobject: <br>
+	 * <code>
+	 *		{<br>
+	 *			"level1": {<br>
+	 *				"level2": {<br>
+	 *					"key": "value"<br>
+	 *				}<br>
+	 *		}
+	 *</code>
+	 * @param keys
+	 * @param value
+	 * @return 
+	 */
 	public JSON add(String[] keys, Object value) {
 		if (keys == null || keys.length == 0) return this.add(value) ;
 		JSONObject o = this.contents;
@@ -129,6 +153,17 @@ public class JSON {
 		}
 		return this;
 	}
+	
+	public JSON addArray(String[] keys, Object... array) {
+//		JSONObject arr = new JSONObject(true);
+//		if (array != null) {
+//			for (Object obj : array) {
+//				arr.add(obj) ;
+//			}
+//		}
+		this.add(keys, array) ;
+		return this;
+ 	}
 	
 	/**
 	 * Removes a value from the top-level only if the key exists.
@@ -153,16 +188,33 @@ public class JSON {
 
 	public static void main(String[] args) throws IOException {
 		JSON json = new JSON() ;
-		json.add(new String[]{"hello there", "general kenobi", "you are", "a bold one"}, "YES!") ;
-		json.add(new String[]{"hello there", "general kenobi", "you are", "very bold"}, "YES!") ;
-		json.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "YES!"}, "\"500\u00B0C/") ;
-		json.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "NO!"}, "\uD834\uDD1E") ;
-		System.out.println(json.toString(true));
-//		
-		
-//		String surrogate = "\\uD834\\uDD1E" ;
-//		System.out.println(Long.parseLong(surrogate, 16));
-
+//		json.add(new String[]{"hello there", "general kenobi", "you are", "a bold one"}, "YES!") 
+//		.add(new String[]{"hello there", "general kenobi", "you are", "very bold"}, "YES!")
+//		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "YES!"}, "\"500\u00B0C/")
+//		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "NO!"}, "\uD834\uDD1E")
+//		.add(new String[]{"hello there", "oh it's you"}, 1234.993E90)
+//		.addArray(new String[]{"hello there", "again"}, 1, 2, 3, 4, "5", null, false, true, true, new LinkedHashMap<Integer, Integer>())
+//				 .add("Some Integers", new Integer[] {5, 6, 7, 8, 9}) ;
+		ConcurrentHashMap<Long, String> h = new ConcurrentHashMap<>() ;
+		Object[] some = new Object[3];
+		h.put(11244334L, "hello there") ;
+		h.put(2343434L, "some value") ;
+		h.put(23223323L, "another value") ;
+		h.put(11244334L, "you guessed it: another value") ;
+		some[0] = h ;
+		HashSet<Boolean> bools = new HashSet<>() ;
+		bools.add(true); bools.add(true); bools.add(false); bools.add(null);
+		some[1] = bools ;
+		LinkedList<String> L = new LinkedList<>() ;
+		L.add("yes") ;
+		L.add("no");
+		L.add("maybe");
+		some[2] = L ;
+		json.add("First key", some) ;
+		json.add(new String[]{"Second key", "Third Key"}, 1198.0092) ;
+		json.add(new String[]{"Second key", "Fourth Key"}, new java.io.File("c:\\mov.txt") );
+		json.add(new String[]{"Second key", "Fifth Key"}, new RuntimeException("yes"));
+ 		System.out.println(json.toString(true));
  	}
 }
 
@@ -393,12 +445,114 @@ class JSONObject extends LinkedHashMap<String, Object> {
 					- String (default) 
 			*/
 			switch (valueType) {
-				case 0: this.add(key, new JSONNull()); break ;
-				case 3: this.add(key, Boolean.valueOf(value)); break ;
-				case 2: this.add(key, new JSONNumber(value)); break ;
-				case 1:
+				case JSONReader.TYPE_NULL: this.add(key, new JSONNull()); break ;
+				case JSONReader.TYPE_BOOLEAN: this.add(key, Boolean.valueOf(value)); break ;
+				case JSONReader.TYPE_NUMBER: this.add(key, new JSONNumber(value)); break ;
+				case JSONReader.TYPE_STRING: this.add(key, value) ; break ;
 				default: this.add(key, value) ;
 			}
+		}
+	}
+	public void add(Object object) {
+		this.add(null, object);
+	}
+	
+	@Override
+	public String toString() {
+		return this.toString(false) ;
+	}
+	
+	public String toString(boolean pretty) {
+		JSONWriter jw = new JSONWriter(pretty) ;
+		jw.writeValue(this) ;
+		return jw.toString();
+	}
+}
+
+class JSONNull {
+	public JSONNull() {}
+	@Override public String toString() { return "null";}
+}
+
+class JSONNumber {
+	public final String value;
+	public JSONNumber(String value) {
+		if (value == null) value = "NaN";
+		if (value.isEmpty()) value = "0";
+		this.value = value;
+	}
+	@Override
+	public String toString() {
+		return value;
+	}
+}
+class JSONWriter {
+	private StringBuilder sb = new StringBuilder() ;
+	private final boolean pretty ; 
+	private final String newLine  ;
+	private int depth = 0 ;
+	JSONWriter(boolean pretty) {
+		this.pretty = pretty ;
+		this.newLine = (pretty ? "\n" : "") ;
+	}
+	public void write(String value) {
+		sb.append(value) ;
+	}
+	public void writeKey(String key) {
+		if (key != null && !key.isEmpty()) write("\"" + key + "\": ") ;
+	}
+	public void writeValue(Object value) {
+		if (value == null) this.write("null");
+		else if (value instanceof List) this.writeValue( ((List) value).toArray() ); 
+		else if  (value instanceof Collection) this.writeValue( ((Collection) value).toArray() ); 
+		else if  (value instanceof Set) this.writeValue( ((Set) value).toArray() ); 
+		else if  (value instanceof Object[]) this.writeArray(value) ;
+		else if (value instanceof Map) this.writeMap(value) ;
+		else if (value instanceof JSONObject) { // object OR array
+			if (((JSONObject) value).isArray) this.writeArray(((JSONObject) value).values().toArray());
+			else this.writeMap(value);
+		}
+		else if (value instanceof Boolean) this.write(value.toString());
+		else if (value instanceof Number) this.write(value.toString());
+		else if (value instanceof JSONNull) this.write(value.toString());
+		else if (value instanceof JSONNumber) this.write(value.toString());
+		else {
+			this.write("\"" + this.escapeString(value.toString()) + "\"");
+		}
+	}
+	
+	private void writeArray(Object array) {
+		if (array instanceof Object[]) {
+			Object[] a = (Object[]) array;
+			write("[" + newLine);
+			depth++;
+			int index = -1 ;
+			for (Object value : a) {
+				index++ ;
+				write(tab());
+				writeValue(value); 
+				if (index != a.length-1) write(", " + newLine);
+			}
+			depth--;
+			write(newLine + tab() + "]")  ;
+		}
+	}
+	
+	private void writeMap(Object map) {
+		if (map instanceof  Map) {
+			Map<Object, Object> m = (Map) map;
+			write("{" + newLine);
+			depth++;
+			int index = -1 ;
+			for (Map.Entry<Object, Object> entry : m.entrySet()) {
+				index++ ;
+				write(tab());
+				writeKey(entry.getKey().toString());
+				writeValue(entry.getValue()); 
+				if (index != m.size()-1) write(", " + newLine);
+			}
+			depth--;
+			write(newLine + tab() + "}")  ;
 		}
 	}
 	
@@ -415,17 +569,10 @@ class JSONObject extends LinkedHashMap<String, Object> {
 				return new Iterator<Integer>() {
 					private int next = 0;
 					private final int length = string.length();
-
 					@Override
 					public boolean hasNext() {
 						return this.next < this.length;
 					}
-
-					/**
-					 * Advance to the next code point.
-					 *
-					 * @return
-					 */
 					@Override
 					public Integer next() {
 						int codePoint = string.codePointAt(next);
@@ -480,60 +627,15 @@ class JSONObject extends LinkedHashMap<String, Object> {
 		return isControl || !inRange ;
 	}
 
-	private String tab(boolean pretty, int depth) {
+	private String tab() {
 		String result = "" ;
 		if (!pretty) return result ;
 		for (int i=0; i< depth; i++) result += "\t" ;
 		return result ;
 	}
-
-	private String toString(JSONObject o, boolean pretty, int depth) {
-		if (o == null) return "{}" ;
-		String nl = (pretty ? "\n" : "") ;
-		String result = (o.isArray ? "[" : "{") + nl;
-		
-		int index = -1 ;
-		for (Map.Entry<String, Object> entry : o.entrySet()) {
-			index++ ;
-			String key = (o.isArray ? "": "\"" + entry.getKey() + "\": ") ;
-			Object value = entry.getValue();
-			String stringValue ;
-			if (value instanceof JSONObject) stringValue = this.toString((JSONObject) value, pretty, depth+1) ; // object OR array
-			else if (value instanceof String) stringValue = "\"" + this.escapeString(value.toString()) + "\"";
-			else stringValue = value.toString()  ;
-			
-			result += tab(pretty, depth+1) + key + stringValue ;
-			if (index != o.size()-1) result += ", " + nl;
-		}
-		
-		return result + nl + tab(pretty, depth) + (o.isArray ? "]" : "}")  ;
-	}
 	
 	@Override
 	public String toString() {
-		return this.toString(this, false, 0);
-	}
-	
-	public String toString(boolean pretty) {
-		return this.toString(this, pretty, 0) ;
-	}
-	
-}
-
-class JSONNull {
-	public JSONNull() {}
-	@Override public String toString() { return "null";}
-}
-
-class JSONNumber {
-	public final String value;
-	public JSONNumber(String value) {
-		if (value == null) value = "NaN";
-		if (value.isEmpty()) value = "0";
-		this.value = value;
-	}
-	@Override
-	public String toString() {
-		return value;
+		return this.sb.toString();
 	}
 }
