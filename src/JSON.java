@@ -5,14 +5,12 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.StringReader;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Lightweight JSON parser.
@@ -27,20 +25,35 @@ public class JSON {
 		this.reader = new JSONReader(reader);
 		parse();
 	}
-
 	public JSON(String string) throws IOException {
 		this.reader = new JSONReader(string);
 		parse();
 	}
-
 	public JSON(InputStream stream) throws IOException {
 		this.reader = new JSONReader(stream);
 		parse();
 	}
+	public JSON() throws IOException { this("") ;}
 	
-	public JSON() throws IOException {
-		this("") ;
+	public boolean isNull() { return contents == null; }
+	public boolean isEmpty() { return this.contents.isEmpty(); }
+	public LinkedHashMap<String, Object> getMap() { return this.contents; }
+	public Set<Entry<String, Object>> entrySet() { return contents.entrySet();}
+	public Set<String> keySet() { return contents.keySet(); }
+	public Collection<Object> values() { return contents.values(); }
+	public byte[] getBytes() { return this.toString().getBytes(); }
+	
+	@Override
+	public String toString() {
+		if (contents == null) return "{}" ;
+		return this.contents.toString(false);
 	}
+	
+	public String toString(boolean pretty) {
+		if (contents == null) return (pretty ? "{\n}" : "{}") ;
+		return this.contents.toString(pretty);
+	}
+	
 	
 	private void parse() throws IOException {
 		reader.fastForward(); // move to the first non-whitespace character
@@ -58,11 +71,11 @@ public class JSON {
 			JSONObject obj = new JSONObject();
 			if (this.reader.state() ==  JSONReader.STATE_ARRAY) obj.isArray = true ; // check if this is an array or not
 
-			String key = "", value = ""; //keys and values will be accumulated in here, we will know when we have either when the state changes to `STATE_KEY_READ` or to `STATE_VALUE_READ`
-			int valueType = -1;  // the reader checks the first character of a value it is reading and returns its guess as to what the type might be
-			while (!reader.done()) { // read until the stream has been consumed
-				char c = reader.read(); // read from the stream and update the state accordingly
-				int state = reader.state(); 
+			String key = "", value = "";		// keys and values will be accumulated here, we will know when we have either when the state changes to `STATE_KEY_READ` or to `STATE_VALUE_READ`
+			int valueType = -1;				// the reader checks the first character of a value it is reading and returns its guess as to what the type might be
+			while (!reader.done()) {			// read until the stream has been consumed
+				char c = reader.read();		// read from the stream and 
+				int state = reader.state();	// update the state accordingly
 				switch (state) {
 					case JSONReader.STATE_ARRAY: // started reading an array OR an object: recurse and return the object
 					case JSONReader.STATE_OBJECT: 
@@ -148,19 +161,13 @@ public class JSON {
 					o.add(key, new JSONObject());
 					o = (JSONObject) o.get(key) ; // `o = (JSONObject) next ; ` is incorrect. We have overwritten the reference to `next` with the last line.
 				}
-				else o = (JSONObject) next ; // move into this object, don't create a new JSONObject, this will delete anything that might be in there 
+				else o = (JSONObject) next ; // move into this object, DON'T create a new JSONObject, this will delete anything that might already be in there.
 			}
 		}
 		return this;
 	}
 	
 	public JSON addArray(String[] keys, Object... array) {
-//		JSONObject arr = new JSONObject(true);
-//		if (array != null) {
-//			for (Object obj : array) {
-//				arr.add(obj) ;
-//			}
-//		}
 		this.add(keys, array) ;
 		return this;
  	}
@@ -174,53 +181,42 @@ public class JSON {
 		this.contents.remove(key) ;
 		return this ;
 	}
-	
-	@Override
-	public String toString() {
-		if (contents == null) return "{}" ;
-		return this.contents.toString(false);
-	}
-	
-	public String toString(boolean pretty) {
-		if (contents == null) return (pretty ? "{\n}" : "{}") ;
-		return this.contents.toString(pretty);
-	}
 
-	public static void main(String[] args) throws IOException {
-		JSON json = new JSON() ;
-//		json.add(new String[]{"hello there", "general kenobi", "you are", "a bold one"}, "YES!") 
-//		.add(new String[]{"hello there", "general kenobi", "you are", "very bold"}, "YES!")
-//		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "YES!"}, "\"500\u00B0C/")
-//		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "NO!"}, "\uD834\uDD1E")
-//		.add(new String[]{"hello there", "oh it's you"}, 1234.993E90)
-//		.addArray(new String[]{"hello there", "again"}, 1, 2, 3, 4, "5", null, false, true, true, new LinkedHashMap<Integer, Integer>())
-//				 .add("Some Integers", new Integer[] {5, 6, 7, 8, 9}) ;
-
-		ConcurrentHashMap<Long, String> h = new ConcurrentHashMap<>() ;
-		Object[] some = new Object[3];
-		h.put(11244334L, "hello there") ;
-		h.put(2343434L, "some value") ;
-		h.put(23223323L, "another value") ;
-		h.put(11244334L, "you guessed it: another value") ;
-		some[0] = h ;
-		HashSet<Boolean> bools = new HashSet<>() ;
-		bools.add(true); bools.add(true); bools.add(false); bools.add(null);
-		some[1] = bools ;
-		LinkedList<String> L = new LinkedList<>() ;
-		L.add("yes") ;
-		L.add("no");
-		L.add("maybe");
-		some[2] = L ;
-		json.add("First key", some) ;
-		json.add(new String[]{"Second key", "Third Key"}, 1198.0092) ;
-		json.add(new String[]{"Second key", "Fourth Key"}, new java.io.File("c:\\mov.txt") );
-		json.add(new String[]{"Second key", "Fifth Key"}, new RuntimeException("yes"));
- 		System.out.println(json.toString(true));
-		JSON json2 = new JSON(json.toString());
-		System.out.println(json2.toString(true));
-
-		System.out.println(json.toString().equals(json2.toString()));
- 	}
+//	public static void main(String[] args) throws IOException {
+//		JSON json = new JSON() ;
+////		json.add(new String[]{"hello there", "general kenobi", "you are", "a bold one"}, "YES!") 
+////		.add(new String[]{"hello there", "general kenobi", "you are", "very bold"}, "YES!")
+////		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "YES!"}, "\"500\u00B0C/")
+////		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "NO!"}, "\uD834\uDD1E")
+////		.add(new String[]{"hello there", "oh it's you"}, 1234.993E90)
+////		.addArray(new String[]{"hello there", "again"}, 1, 2, 3, 4, "5", null, false, true, true, new LinkedHashMap<Integer, Integer>())
+////				 .add("Some Integers", new Integer[] {5, 6, 7, 8, 9}) ;
+//
+//		ConcurrentHashMap<Long, String> h = new ConcurrentHashMap<>() ;
+//		Object[] some = new Object[3];
+//		h.put(11244334L, "hello there") ;
+//		h.put(2343434L, "some value") ;
+//		h.put(23223323L, "another value") ;
+//		h.put(11244334L, "you guessed it: another value") ;
+//		some[0] = h ;
+//		HashSet<Boolean> bools = new HashSet<>() ;
+//		bools.add(true); bools.add(true); bools.add(false); bools.add(null);
+//		some[1] = bools ;
+//		LinkedList<String> L = new LinkedList<>() ;
+//		L.add("yes") ;
+//		L.add("no");
+//		L.add("maybe");
+//		some[2] = L ;
+//		json.add("First key", some) ;
+//		json.add(new String[]{"Second key", "Third Key"}, 1198.0092) ;
+//		json.add(new String[]{"Second key", "Fourth Key"}, new java.io.File("c:\\mov.txt") );
+//		json.add(new String[]{"Second key", "Fifth Key"}, new RuntimeException("yes"));
+// 		System.out.println(json.toString(true));
+//		JSON json2 = new JSON(json.toString());
+//		System.out.println(json2.toString(true));
+//
+//		System.out.println(json.toString().equals(json2.toString()));
+// 	}
 }
 
 /**
