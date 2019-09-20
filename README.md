@@ -45,20 +45,21 @@ One way to add values is to specify the key path as a String array. To create th
 ```java
 JSON json = new JSON();
 json.add(new String[]{"details", "name"}, "Bob")
-    .add(new String[]{"details", "age"}, 22);
+    .add(new String[]{"details", "age"}, 22); //notice the method chaining
 ```
-However, this is cumbersome. A better way is to do the following:
+However, this is cumbersome, we need to create a new String array for each item. A better way is to do the following:
 ```java
 JSON json = new JSON();
 json.key("details", "name").value("Bob")
-    .key("details", "age").value(22);
+    .key("details", "age").value(22); //notice the method chaining
 ```
 This too has redundancies and can be improved, as the "details" key is specified twice. The best way is to do the following:
 ```java
 JSON json = new JSON();
 json.key("details")
     .value("name", "Bob")
-    .value("age", 22);
+    .value("age", 22); //notice the method chaining
 ```
 
+## Removing values
 
