@@ -26,6 +26,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * Lightweight JSON parser.
@@ -35,21 +39,31 @@ import java.util.Set;
 public class JSON {
 	private final JSONReader reader;
 	private JSONObject contents;
+	private String[] ephemeral ; // ephemeral keys (set by the `key()` method, and used by the `value()` method to add a key-value pair to the json)
 
-	public JSON(Reader reader) throws IOException {
+	/*Constructors ********************************************************************************************************************************************/
+	public JSON(Reader reader) {
 		this.reader = new JSONReader(reader);
-		parse();
+		try { parse();}
+		catch (IOException ex) { }
 	}
-	public JSON(String string) throws IOException {
+	public JSON(String string) {
 		this.reader = new JSONReader(string);
-		parse();
+		try { parse();}
+		catch (IOException ex) { }
 	}
-	public JSON(InputStream stream) throws IOException {
+	public JSON(InputStream stream) {
 		this.reader = new JSONReader(stream);
-		parse();
+		try { parse();}
+		catch (IOException ex) { }
 	}
-	public JSON() throws IOException { this("") ;}
+	public JSON() { this("") ;}
+	public JSON(Map<String, Object> map) throws Exception {
+		this.reader = null;
+		this.contents = new JSONObject(map);
+	}
 	
+	/*Basic Stuff ********************************************************************************************************************************************/
 	public boolean isNull() { return contents == null; }
 	public boolean isEmpty() { return this.contents.isEmpty(); }
 	public LinkedHashMap<String, Object> getMap() { return this.contents; }
@@ -58,8 +72,8 @@ public class JSON {
 	public Collection<Object> values() { return contents.values(); }
 	public byte[] getBytes() { return this.toString().getBytes(); }
 	
-	@Override
-	public String toString() {
+	/*To String ********************************************************************************************************************************************/
+	@Override public String toString() {
 		if (contents == null) return "{}" ;
 		return this.contents.toString(false);
 	}
@@ -69,10 +83,10 @@ public class JSON {
 		return this.contents.toString(pretty);
 	}
 	
-	
+	/*Parsing ********************************************************************************************************************************************/
 	private void parse() throws IOException {
 		reader.fastForward(); // move to the first non-whitespace character
-		contents = this.parseObject(); 
+		contents = this.parseObject();
 		if (contents == null) contents = new JSONObject() ;
 	}
 	
@@ -123,6 +137,7 @@ public class JSON {
 		return null;
 	}
 	
+	/*Inserting and Removing values ***************************************************************************************************************************/
 	/**
 	 * Adds a key-value pair to the top-level of the JSON. If the key supplied is null, one will be auto-generated.
 	 * @param value
@@ -196,42 +211,129 @@ public class JSON {
 		this.contents.remove(key) ;
 		return this ;
 	}
-
-//	public static void main(String[] args) throws IOException {
-//		JSON json = new JSON() ;
-////		json.add(new String[]{"hello there", "general kenobi", "you are", "a bold one"}, "YES!") 
-////		.add(new String[]{"hello there", "general kenobi", "you are", "very bold"}, "YES!")
-////		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "YES!"}, "\"500\u00B0C/")
-////		.add(new String[]{"hello there", "general kenobi", "you are", "very bold", "NO!"}, "\uD834\uDD1E")
-////		.add(new String[]{"hello there", "oh it's you"}, 1234.993E90)
-////		.addArray(new String[]{"hello there", "again"}, 1, 2, 3, 4, "5", null, false, true, true, new LinkedHashMap<Integer, Integer>())
-////				 .add("Some Integers", new Integer[] {5, 6, 7, 8, 9}) ;
-//
-//		ConcurrentHashMap<Long, String> h = new ConcurrentHashMap<>() ;
-//		Object[] some = new Object[3];
-//		h.put(11244334L, "hello there") ;
-//		h.put(2343434L, "some value") ;
-//		h.put(23223323L, "another value") ;
-//		h.put(11244334L, "you guessed it: another value") ;
-//		some[0] = h ;
-//		HashSet<Boolean> bools = new HashSet<>() ;
-//		bools.add(true); bools.add(true); bools.add(false); bools.add(null);
-//		some[1] = bools ;
-//		LinkedList<String> L = new LinkedList<>() ;
-//		L.add("yes") ;
-//		L.add("no");
-//		L.add("maybe");
-//		some[2] = L ;
-//		json.add("First key", some) ;
-//		json.add(new String[]{"Second key", "Third Key"}, 1198.0092) ;
-//		json.add(new String[]{"Second key", "Fourth Key"}, new java.io.File("c:\\mov.txt") );
-//		json.add(new String[]{"Second key", "Fifth Key"}, new RuntimeException("yes"));
-// 		System.out.println(json.toString(true));
-//		JSON json2 = new JSON(json.toString());
-//		System.out.println(json2.toString(true));
-//
-//		System.out.println(json.toString().equals(json2.toString()));
-// 	}
+	
+	/**
+	 * Gets a value at a particular key path, returns null if the key path is incorrect. If no key path is specified, the entire JSON object is returned.
+	 * @param keys
+	 * @return 
+	 */
+	public Object get(String... keys) {
+		if (keys == null || keys.length == 0) return this.contents;
+		LinkedHashMap<String, Object> current = this.contents;
+		int index = 0;
+		for (String key : keys) {
+			index++;
+			if (current.containsKey(key)) { //move in...
+				Object inner = current.get(key);
+				
+				if (index == keys.length) { // the last key so simply return `inner`
+					return inner;
+				} else { // not the last key, change `current` to the value at this key only if it is a map, otherwise the key path is incorrect
+					if (inner instanceof Map) current = (LinkedHashMap<String, Object>) inner;
+					else return null;
+				}
+			} else return null;
+		}
+		return null;
+	}
+	
+//	public boolean hasKey(String... keys) {
+//		if (keys != null && keys.length > 0) {
+//			for ()
+//		}
+//		return false;
+//	}
+	
+	/**
+	 * Creates a temporary key path. This should be used immediately before calling the `value()` method where the value for this key will be set.
+	 * @param keys
+	 * @return 
+	 */
+	public JSON key(String... keys) {
+		if (keys != null && keys.length > 0) {
+			this.ephemeral = keys;
+		} 
+		else this.ephemeral = new String[] {"0"};
+		return this;
+	}
+	
+	/**
+	 * Adds the value at the temporary key path created with the `key()` method.
+	 * @param value
+	 * @return 
+	 */
+	public JSON value(Object value) {
+		return this.add(ephemeral, value);
+	}
+	
+	private String[] expandArray(String[] array, String nextValue) {
+		String[] newArray = new String[array.length+1];
+		System.arraycopy(array, 0, newArray, 0, array.length);
+		newArray[newArray.length-1] = nextValue;
+		return newArray;
+	}
+	
+	/**
+	 * Adds a value at the temporary key path created with the `key()` method, but adds `subKey` to the key path.
+	 * @param subKey
+	 * @param value
+	 * @return 
+	 */
+	public JSON value(String subKey, Object value) {
+		if (subKey == null || subKey.isEmpty()) return this.value(value);
+		
+		String[] ephemeralNew = expandArray(ephemeral, subKey);
+		return this.add(ephemeralNew, value);
+	}
+	
+	/*Fancy stuff ********************************************************************************************************************************************/
+	public void forEach(BiConsumer<? super String, ? super Object> action) {
+		if (contents == null) return;
+		this.contents.forEach(action) ;
+	}
+	
+	public JSON filterByValue(Map<String, Object> map, Predicate<? super Object> predicate) throws Exception {
+		if (contents == null) return new JSON();
+		Map<String, Object> result = 
+								map.entrySet()
+								.stream()
+								//.filter(entry -> predicate.test(entry.getValue()))
+								.filter(predicate)
+								.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+		return new JSON(result) ;
+	}
+	
+	/**
+	 * Filters the JSON with a given predicate. A predicate is a mathematical function that receives a value and
+	 * returns a BOOLEAN. The predicate you specify must return `true` if you want to keep the key-value pair and
+	 * return `false` if you wish to discard it. For example let's say we have the following object:<br>
+	 * [ {"name": "Alice"}, {"name": "Allen"}, {"name": "Bob"} ]<br><br>
+	 * If we want to filter this object and only display people whose names start with 'A', we can do the following:<br>
+	 * <code> 
+	 * JSON json = new JSON("[ {\"name\": \"Alice\"}, {\"name\": \"Allen\"}, {\"name\": \"Bob\"} ]") ;<br>
+	 * JSON filteredJson = json.filter( (entry) -> {return ((LinkedHashMap<String, Object>) entry.getValue()) // cast this value to a map<br>
+	 * .get("name") //get the 'name' key<br> 
+	 * .startsWith("A");}); //check if it starts with an 'A'<br>
+	 * </code>
+	 * @param entryPredicate
+	 * @return
+	 * @throws Exception 
+	 */
+	public JSON filter(Predicate<? super Entry<String, Object>> entryPredicate) throws Exception {
+		if (contents == null) return new JSON();
+		Map<String, Object> map = this.contents
+								.entrySet()
+								.stream()
+								.filter(entryPredicate)
+								.collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)) ;
+		return new JSON(map);
+	}
+	
+	public JSON replaceAll(BiFunction<? super String, ? super Object, ? super Object> function) throws Exception {
+		if (contents == null) return new JSON();
+		this.contents.replaceAll(function);
+		return this;
+	}
 }
 
 /**
@@ -336,7 +438,7 @@ class JSONReader {
 				case 'r': return '\r'; // carriage return
 				case 't': return '\t'; //tab
 				case '\\': return '\\' ; // slash
-				case '/': return '/';
+//				case '/': return '/';
 			}
 			state = STATE_VALUE; //we can only encounter an escape sequence in a value, so return to this state.
 		}
@@ -434,9 +536,8 @@ class JSONReader {
 class JSONObject extends LinkedHashMap<String, Object> {
 	private int autoKey = -1;
 	boolean isArray = false;
-	public JSONObject() {
-		super() ;
-	}
+	public JSONObject() { super() ; }
+	public JSONObject(Map<String, Object> map) {super(map) ;}
 	public JSONObject(boolean isArray) {
 		super() ;
 		this.isArray = isArray;
@@ -614,7 +715,7 @@ class JSONWriter {
 				case '\f': sb.append("\\\f"); break ;
 				case '\r': sb.append("\\\r"); break ;
 				case '\b': sb.append("\\\b"); break;
-				case '/': sb.append("\\/") ; break ;
+//				case '/': sb.append("\\/") ; break ;
 				default:
 					if (needsEscaping(codePoint) || Character.isSurrogate((char) codePoint)) {
 						if (Character.isSurrogate((char) codePoint)) {
@@ -653,3 +754,22 @@ class JSONWriter {
 		return this.sb.toString();
 	}
 }
+
+		
+//		json = json.filter( (entry) -> {
+//			return ((LinkedHashMap<String, Object>) entry.getValue()).get("color").toString().equals("#00FFFF");
+//		});
+		
+//		System.out.println(json.toString(true));
+//		System.out.println(sc.jsonToKVS(json).toString(true, true));
+	
+//		JSON j = new JSON() ;
+//		j.key("outer1")
+//								.value("inner1", "hello there")
+//								.value("inner2", "general kenobi")
+//		.key("outer2")
+//								.value("inner1", "hello there again")
+//								.value("inner2", "you are a bold one");
+//		System.out.println(j.toString(true));
+//		System.out.println(j.get("outer2"));
+//		System.out.println(j.get("outer2", "inner1", "inner4"));
