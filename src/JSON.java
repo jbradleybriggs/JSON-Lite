@@ -40,7 +40,7 @@ public class JSON {
 	private final JSONReader reader;
 	private JSONObject contents;
 	private String[] ephemeral ; // ephemeral keys (set by the `key()` method, and used by the `value()` method to add a key-value pair to the json)
-
+	
 	/*Constructors ********************************************************************************************************************************************/
 	public JSON(Reader reader) {
 		this.reader = new JSONReader(reader);
@@ -182,15 +182,17 @@ public class JSON {
 		if (keys == null || keys.length == 0) return this.add(value) ;
 		JSONObject o = this.contents;
 		int index = -1;
+		boolean array;
 		for (String key : keys) {
 			index++ ;
-			if (index == keys.length-1) o.add(key, value) ;
-			else {
+			if (key != null && key.endsWith("[")) {
+				array = true;
+				key = key.substring(0, key.length()-1);
+			} else array = false;
+			if (index == keys.length-1) o.add(key, value) ; // final key: add value at this key
+			else {								   // not the final key: create an object OR an array, an move into it
 				Object next = o.get(key)  ; 
-				if (next == null || !(next instanceof JSONObject)) { // add a new object if the key doesn't exist or the key does exist but isn't an object
-					o.add(key, new JSONObject());
-					o = (JSONObject) o.get(key) ; // `o = (JSONObject) next ; ` is incorrect. We have overwritten the reference to `next` with the last line.
-				}
+				if (next == null || !(next instanceof JSONObject)) o = (JSONObject) o.add(key, new JSONObject(array)); // add a new object if the key doesn't exist or the key does exist but isn't an object
 				else o = (JSONObject) next ; // move into this object, DON'T create a new JSONObject, this will delete anything that might already be in there.
 			}
 		}
@@ -203,13 +205,24 @@ public class JSON {
  	}
 	
 	/**
-	 * Removes a value from the top-level only if the key exists.
-	 * @param key
+	 * Removes a value if the key exists and returns it; returns null otherwise.
+	 * @param keys
 	 * @return 
 	 */
-	public JSON remove(String key) {
-		this.contents.remove(key) ;
-		return this ;
+	public Object remove(String... keys) {
+		if (keys == null || keys.length == 0) return null;
+		Object current = this.contents;
+		int index=-1;
+		for (String key: keys) {
+			index++;
+			if (current instanceof Map) {
+				if ( ((Map<String, Object>) current).containsKey(key) )  {
+					if (index != keys.length-1) current = ((Map<String, Object>) current).get(key); // not the final key: move in
+					else return ((Map<String, Object>) current).remove(key); // the final key: remove this value
+				} else return null; //key does not exist
+			}
+		}
+		return null ;
 	}
 	
 	/**
@@ -237,12 +250,7 @@ public class JSON {
 		return null;
 	}
 	
-//	public boolean hasKey(String... keys) {
-//		if (keys != null && keys.length > 0) {
-//			for ()
-//		}
-//		return false;
-//	}
+	public boolean hasKey(String... keys) { return this.get(keys) != null; }
 	
 	/**
 	 * Creates a temporary key path. This should be used immediately before calling the `value()` method where the value for this key will be set.
@@ -250,9 +258,7 @@ public class JSON {
 	 * @return 
 	 */
 	public JSON key(String... keys) {
-		if (keys != null && keys.length > 0) {
-			this.ephemeral = keys;
-		} 
+		if (keys != null && keys.length > 0) this.ephemeral = keys;
 		else this.ephemeral = new String[] {"0"};
 		return this;
 	}
@@ -262,19 +268,17 @@ public class JSON {
 	 * @param value
 	 * @return 
 	 */
-	public JSON value(Object value) {
-		return this.add(ephemeral, value);
-	}
-	
-	private String[] expandArray(String[] array, String nextValue) {
-		String[] newArray = new String[array.length+1];
-		System.arraycopy(array, 0, newArray, 0, array.length);
-		newArray[newArray.length-1] = nextValue;
-		return newArray;
-	}
+	public JSON value(Object value) { return this.add(ephemeral, value); }
 	
 	/**
-	 * Adds a value at the temporary key path created with the `key()` method, but adds `subKey` to the key path.
+	 * Adds the values as an array at the temporary key path created with the `key()` method.
+	 * @param array
+	 * @return 
+	 */
+	public JSON value(Object... array) { return this.addArray(ephemeral, array); }
+	
+	/**
+	 * Adds a value at the temporary key path created with the `key()` method, but appends `subKey` to the key path.
 	 * @param subKey
 	 * @param value
 	 * @return 
@@ -282,11 +286,81 @@ public class JSON {
 	public JSON value(String subKey, Object value) {
 		if (subKey == null || subKey.isEmpty()) return this.value(value);
 		
-		String[] ephemeralNew = expandArray(ephemeral, subKey);
+		String[] ephemeralNew = arrayPush(ephemeral, subKey);
 		return this.add(ephemeralNew, value);
 	}
+	/**
+	 * Adds the values as an array at the temporary key path created with the `key()` method, but appends `subKey` to the key path.
+	 * @param subKey
+	 * @param value
+	 * @return 
+	 */
+	public JSON value(String subKey, Object... value) {
+		if (subKey == null || subKey.isEmpty()) return this.value(value);
+		
+		String[] ephemeralNew = arrayPush(ephemeral, subKey);
+		return this.addArray(ephemeralNew, value);
+	}
 	
-	/*Fancy stuff ********************************************************************************************************************************************/
+	/**
+	 * Moves up the temporary key path created with the `key()` method, by the `numOfKeys` parameter.
+	 * @param numOfKeys
+	 * @return 
+	 */
+	public JSON up(int numOfKeys) {
+		if (numOfKeys <= 0) return this;
+		ephemeral = arrayPop(ephemeral, numOfKeys);
+		return this;
+	}
+	
+	/**
+	 * Moves up 1 key in the temporary key path created with the `key()` method. This is equivalent to `up(1)`
+	 * @return 
+	 */
+	public JSON up() { return up(1); }
+	
+	public JSON down(String key) {
+		ephemeral = arrayPush(ephemeral, key);
+		return this;
+	}
+	
+	private Object[] arrayDelete(Object[] original, int index) {
+		if (original == null) return null;
+		if (index < 0 || index > original.length-1) return original;
+		Object[] o = new Object[original.length-1];
+		int j=-1;
+		for (int i=0; i< original.length; i++) {
+			if (i != index) {
+				j++;
+				o[j] = original[i];
+			}
+		}
+		return o;
+	}
+	
+	/**
+	 * Pops a certain number of items off the end of the specified array.
+	 * @param array
+	 * @param num
+	 * @return 
+	 */
+	private String[] arrayPop(String[] array, int num) {
+		if (array == null || array.length == 0) return null;
+		if (num <= 0) return array;
+		if (num >= array.length) return new String[0];
+		String[] out = new String[array.length-num];
+		System.arraycopy(array, 0, out, 0, array.length-num);
+		return out;
+	}
+	
+	private String[] arrayPush(String[] array, String value) {
+		String[] newArray = new String[array.length+1];
+		System.arraycopy(array, 0, newArray, 0, array.length);
+		newArray[newArray.length-1] = value;
+		return newArray;
+	}
+	
+	/*Functional stuff ********************************************************************************************************************************************/
 	public void forEach(BiConsumer<? super String, ? super Object> action) {
 		if (contents == null) return;
 		this.contents.forEach(action) ;
@@ -334,6 +408,58 @@ public class JSON {
 		this.contents.replaceAll(function);
 		return this;
 	}
+	
+	public static void main(String[] args) {
+		JSON json = new JSON() ;
+//		json.key("a", "b")
+//				  .value("c", "hello")
+//				  .value("d", "there")
+//			.key("a", "e")
+//				  .value("f", "General")
+//				  .value("g", "Kenobi")
+//			.key("h")
+//				  .value("i", 56, 34, 2)
+//			.key("j", "k", "l", "m")
+//				  .value("n", "You Are")
+//				  .value("o", "A Bold")
+//				  .value("p", 1)
+//			.up() //j, k, l
+//				  .value("q", null, null)
+//			.key("r", "s[", "0")
+//				  .value("t", 12, 13)
+//				  .value("u", false)
+//			.key("r", "s[", "1")
+//				  .value("t", 98, 223)
+//				  .value("u", true)
+//			.key("v[", "[")
+//				  .value("[", 12.3, 23.2, 11.2)
+//				  .value("[", 45.2, 0.65, 23.1)
+//			.key("w", "x")
+//				  .value("y", "Oh it's you")
+//				  .value("z", "Hello again there") ;
+				  
+//		json.key("a[", "[")
+//				  .value("[", 12, 13, 14, 15)
+//				  .value("[", 34, 56, 12, 32)
+//			.key("b[", "[")
+//				  .value("[", 34, 56, 34, 12)
+//				  .value("[", 122, 342, 223, 12)
+//			;
+
+		json.key("users[", "0")
+				  .value("name", "Bob")
+				  .value("age", 22)
+			.key("users[", "1")
+				   .value("name", "Alice")
+				  .value("age", 31)
+				  
+				  ;
+		
+//		System.out.println(json.remove("j", "k", "l", "q"));
+		System.out.println(json.toString(true));
+		System.out.println(json.get("users", "0", "name"));
+//		System.out.println(json.get("r"));
+	}
 }
 
 /**
@@ -366,43 +492,25 @@ class JSONReader {
 	public static final int TYPE_NUMBER = 2 ;
 	public static final int TYPE_BOOLEAN = 3 ;
 
-	public JSONReader(Reader reader) {
-		this.reader = reader;
-	}
-
-	public JSONReader(InputStream stream) {
-		this.reader = new InputStreamReader(stream);
-	}
-
-	public JSONReader(String string) {
-		this.reader = new StringReader(string);
-	}
-
-	public int state() {
-		return this.state;
-	}
-	
-	public int type() {
-		return this.type;
-	}
+	public JSONReader(Reader reader) { this.reader = reader; }
+	public JSONReader(InputStream stream) { this.reader = new InputStreamReader(stream); }
+	public JSONReader(String string) { this.reader = new StringReader(string); }
+	public int state() { return this.state; }
+	public int type() { return this.type; }
 
 	/**
 	 * Whether the reader is done reading.
 	 *
 	 * @return
 	 */
-	public boolean done() {
-		return this.done;
-	}
+	public boolean done() { return this.done; }
 
 	/**
 	 * Read one more character and return it.
 	 * @return
 	 * @throws IOException 
 	 */
-	private char advance() throws IOException {
-		return (char) reader.read();
-	}
+	private char advance() throws IOException { return (char) reader.read(); }
 
 	/**
 	 * Skips whitespace to the next non-whitespace character and returns it.
@@ -542,13 +650,24 @@ class JSONObject extends LinkedHashMap<String, Object> {
 		super() ;
 		this.isArray = isArray;
 	}
-	public void add(String key, Object object) {
+	public JSONObject(Object[] array) {
+		super(new LinkedHashMap<String, Object>());
+		this.isArray = true;
+		if (array != null) {
+			int i=-1;
+			for (Object item : array) this.put(String.valueOf(++i), item);
+		}
+	};
+	public Object add(String key, Object object) {
 		if (key == null || key.isEmpty()) {
 			autoKey++;
 			key = String.valueOf(autoKey);
 		}
 		if (object == null) object = new JSONNull() ;
-		this.put(key, object) ;
+		if (object instanceof Object[] ) this.put(key, new JSONObject((Object[]) object)) ;
+		else if (object instanceof JSON) this.put(key, ((JSON) object).getMap());
+		else this.put(key, object) ;
+		return this.get(key);
 	}
 	public void add(String key, String value, int valueType) {
 		if (key == null) key = "" ;
@@ -584,6 +703,8 @@ class JSONObject extends LinkedHashMap<String, Object> {
 		jw.writeValue(this) ;
 		return jw.toString();
 	}
+	
+	public Object[] toArray() { return this.values().toArray(); }
 }
 
 class JSONNull {
@@ -754,22 +875,3 @@ class JSONWriter {
 		return this.sb.toString();
 	}
 }
-
-		
-//		json = json.filter( (entry) -> {
-//			return ((LinkedHashMap<String, Object>) entry.getValue()).get("color").toString().equals("#00FFFF");
-//		});
-		
-//		System.out.println(json.toString(true));
-//		System.out.println(sc.jsonToKVS(json).toString(true, true));
-	
-//		JSON j = new JSON() ;
-//		j.key("outer1")
-//								.value("inner1", "hello there")
-//								.value("inner2", "general kenobi")
-//		.key("outer2")
-//								.value("inner1", "hello there again")
-//								.value("inner2", "you are a bold one");
-//		System.out.println(j.toString(true));
-//		System.out.println(j.get("outer2"));
-//		System.out.println(j.get("outer2", "inner1", "inner4"));
